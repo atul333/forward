@@ -159,9 +159,12 @@ class MessageForwarder:
             
             # Build parameters for iter_messages
             iter_params = {
-                'limit': limit,
                 'reverse': True  # Iterate from oldest to newest (chronological order)
             }
+            
+            # Only set limit if explicitly provided (otherwise iterate through all messages)
+            if limit is not None:
+                iter_params['limit'] = limit
             
             # Set up the ID range for iteration
             if end_id is not None:
