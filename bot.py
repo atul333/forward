@@ -158,95 +158,116 @@ class MessageForwarder:
             first_msg_id = None
             
             # Build parameters for iter_messages
+            # IMPORTANT: Explicitly set limit=None to override Telethon's default 100 message limit
             iter_params = {
-                'reverse': True  # Iterate from oldest to newest (chronological order)
+                'reverse': True,  # Iterate from oldest to newest (chronological order)
+                'limit': None if limit is None else limit  # None = unlimited, otherwise use provided limit
             }
             
-            # Only set limit if explicitly provided (otherwise iterate through all messages)
-            if limit is not None:
-                iter_params['limit'] = limit
             
-            # Set up the ID range for iteration
-            if end_id is not None:
-                # If end_id is specified, iterate from start_id to end_id
-                iter_params['min_id'] = start_id - 1  # Start from this ID (exclusive)
-                iter_params['max_id'] = end_id + 1     # End at this ID (exclusive)
-                logger.info(f"Forwarding messages from ID {start_id} to {end_id}")
-            else:
-                # If no end_id, start from start_id and go to the latest message
-                iter_params['min_id'] = start_id - 1  # Start from this ID (exclusive)
-                logger.info(f"Forwarding all messages from ID {start_id} onwards")
-
+            # IMPORTANT: Manual iteration to avoid Telethon's hidden limits
+            # We'll fetch messages in batches and continue until we run out
+            end_msg = f" to {end_id}" if end_id else " onwards"
+            logger.info(f"Starting manual iteration from message ID {start_id}{end_msg}")
             
-            # Get messages from source channel
-            async for message in self.client.iter_messages(
-                self.source_channel,
-                **iter_params
-            ):
-                # Track first message ID
-                if first_msg_id is None:
-                    first_msg_id = message.id
+            current_offset_id = 0  # Start from the beginning
+            batch_size = 100  # Fetch 100 messages at a time
+            
+            while True:
+                # Fetch a batch of messages
+                messages_batch = await self.client.get_messages(
+                    self.source_channel,
+                    limit=batch_size,
+                    offset_id=current_offset_id,
+                    reverse=True  # Get messages in chronological order
+                )
                 
-                try:
-                    # Forward message to destination
-                    await self.client.forward_messages(
-                        self.destination_channel,
-                        message
-                    )
-                    messages_forwarded += 1
-                    last_successful_msg_id = message.id
-                    logger.info(f"Forwarded message {message.id} ({messages_forwarded} total)")
+                # If no more messages, we're done
+                if not messages_batch:
+                    logger.info("No more messages to process")
+                    break
+                
+                logger.info(f"Fetched batch of {len(messages_batch)} messages, processing...")
+                
+                # Process each message in the batch
+                for message in messages_batch:
+                    # Update offset for next batch
+                    current_offset_id = message.id
                     
-                    # Add a small delay to avoid rate limiting
-                    await asyncio.sleep(DELAY_BETWEEN_FORWARDS)
+                    # Skip messages before start_id
+                    if message.id < start_id:
+                        continue
                     
-                except FloodWaitError as e:
-                    flood_wait_count += 1
-                    # Calculate wait time (add 60 seconds buffer for safety)
-                    wait_seconds = e.seconds + 60
-                    wait_minutes = wait_seconds / 60
+                    # Skip messages after end_id (if specified)
+                    if end_id is not None and message.id > end_id:
+                        logger.info(f"Reached end_id {end_id}, stopping")
+                        break
+    
+                    # Track first message ID
+                    if first_msg_id is None:
+                        first_msg_id = message.id
                     
-                    # Calculate resume time
-                    resume_time = datetime.now() + timedelta(seconds=wait_seconds)
-                    
-                    logger.warning("=" * 70)
-                    logger.warning(f"⚠️  FLOOD WAIT ERROR #{flood_wait_count} on message {message.id}")
-                    logger.warning(f"Required wait: {e.seconds} seconds ({e.seconds/60:.1f} minutes)")
-                    logger.warning(f"Actual wait (with buffer): {wait_seconds} seconds ({wait_minutes:.1f} minutes)")
-                    logger.warning(f"Current time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-                    logger.warning(f"Resume time: {resume_time.strftime('%Y-%m-%d %H:%M:%S')}")
-                    logger.warning(f"Last successful message ID: {last_successful_msg_id}")
-                    logger.warning(f"Will resume from message ID: {message.id}")
-                    logger.warning("=" * 70)
-                    
-                    # Wait for the required time
-                    logger.info(f"Waiting for {wait_minutes:.1f} minutes...")
-                    await asyncio.sleep(wait_seconds)
-                    
-                    logger.info("Wait complete! Resuming forwarding...")
-                    
-                    # Retry forwarding this message
                     try:
+                        # Forward message to destination
                         await self.client.forward_messages(
                             self.destination_channel,
                             message
                         )
                         messages_forwarded += 1
                         last_successful_msg_id = message.id
-                        logger.info(f"✓ Successfully forwarded message {message.id} after wait")
+                        logger.info(f"Forwarded message {message.id} ({messages_forwarded} total)")
                         
-                        # Add delay after successful retry
+                        # Add a small delay to avoid rate limiting
                         await asyncio.sleep(DELAY_BETWEEN_FORWARDS)
                         
-                    except Exception as retry_error:
+                    except FloodWaitError as e:
+                        flood_wait_count += 1
+                        # Calculate wait time (add 60 seconds buffer for safety)
+                        wait_seconds = e.seconds + 60
+                        wait_minutes = wait_seconds / 60
+                        
+                        # Calculate resume time
+                        resume_time = datetime.now() + timedelta(seconds=wait_seconds)
+                        
+                        logger.warning("=" * 70)
+                        logger.warning(f"⚠️  FLOOD WAIT ERROR #{flood_wait_count} on message {message.id}")
+                        logger.warning(f"Required wait: {e.seconds} seconds ({e.seconds/60:.1f} minutes)")
+                        logger.warning(f"Actual wait (with buffer): {wait_seconds} seconds ({wait_minutes:.1f} minutes)")
+                        logger.warning(f"Current time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                        logger.warning(f"Resume time: {resume_time.strftime('%Y-%m-%d %H:%M:%S')}")
+                        logger.warning(f"Last successful message ID: {last_successful_msg_id}")
+                        logger.warning(f"Will resume from message ID: {message.id}")
+                        logger.warning("=" * 70)
+                        
+                        # Wait for the required time
+                        logger.info(f"Waiting for {wait_minutes:.1f} minutes...")
+                        await asyncio.sleep(wait_seconds)
+                        
+                        logger.info("Wait complete! Resuming forwarding...")
+                        
+                        # Retry forwarding this message
+                        try:
+                            await self.client.forward_messages(
+                                self.destination_channel,
+                                message
+                            )
+                            messages_forwarded += 1
+                            last_successful_msg_id = message.id
+                            logger.info(f"✓ Successfully forwarded message {message.id} after wait")
+                            
+                            # Add delay after successful retry
+                            await asyncio.sleep(DELAY_BETWEEN_FORWARDS)
+                            
+                        except Exception as retry_error:
+                            messages_failed += 1
+                            logger.error(f"Failed to forward message {message.id} even after waiting: {retry_error}")
+                            continue
+                        
+                    except Exception as e:
                         messages_failed += 1
-                        logger.error(f"Failed to forward message {message.id} even after waiting: {retry_error}")
+                        logger.error(f"Error forwarding message {message.id}: {e}")
                         continue
-                    
-                except Exception as e:
-                    messages_failed += 1
-                    logger.error(f"Error forwarding message {message.id}: {e}")
-                    continue
+
             
             # Calculate statistics
             end_time = datetime.now()
