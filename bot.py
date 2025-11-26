@@ -127,13 +127,19 @@ class MessageForwarder:
             
             # Build parameters for iter_messages
             iter_params = {
-                'limit': limit,
-                'min_id': start_id - 1
+                'limit': limit
             }
             
-            # Only add max_id if end_id is specified
+            # Set up the ID range for iteration
             if end_id is not None:
+                # If end_id is specified, iterate from end_id down to start_id
                 iter_params['max_id'] = end_id
+                iter_params['min_id'] = start_id - 1
+            else:
+                # If no end_id, start from start_id and go backwards (to older messages)
+                # We use offset_id to start from start_id
+                iter_params['offset_id'] = start_id
+                iter_params['min_id'] = 0  # Go all the way to the beginning
             
             # Get messages from source channel
             async for message in self.client.iter_messages(
