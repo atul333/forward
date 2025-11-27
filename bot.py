@@ -40,10 +40,10 @@ class MessageForwarder:
             self.source_channel = await self.client.get_entity(SOURCE_CHANNEL_ID)
             logger.info(f"Source channel found: {self.source_channel.title}")
             
-            # Get destination channel - handle invite links
+            # Get destination channel - handle invite links, usernames, or IDs
             try:
-                # If it's an invite link (contains +), we need to join first
-                if '+' in DESTINATION_CHANNEL or 'joinchat' in DESTINATION_CHANNEL:
+                # Check if DESTINATION_CHANNEL is a string (username or invite link) or integer (channel ID)
+                if isinstance(DESTINATION_CHANNEL, str) and ('+' in DESTINATION_CHANNEL or 'joinchat' in DESTINATION_CHANNEL):
                     logger.info("Destination is an invite link, attempting to join...")
                     # Extract the hash from the invite link
                     invite_hash = DESTINATION_CHANNEL.split('+')[-1].split('/')[-1]
@@ -67,8 +67,9 @@ class MessageForwarder:
                         self.destination_channel = await self.client.get_entity(DESTINATION_CHANNEL)
                         logger.info(f"Destination channel found: {self.destination_channel.title}")
                 else:
-                    # Regular channel username or ID
-                    logger.info(f"Getting destination channel: {DESTINATION_CHANNEL}")
+                    # Regular channel username (string) or ID (integer)
+                    dest_type = "ID" if isinstance(DESTINATION_CHANNEL, int) else "username"
+                    logger.info(f"Getting destination channel by {dest_type}: {DESTINATION_CHANNEL}")
                     self.destination_channel = await self.client.get_entity(DESTINATION_CHANNEL)
                     logger.info(f"Destination channel found: {self.destination_channel.title}")
                     
