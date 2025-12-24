@@ -146,9 +146,10 @@ class MessageForwarder:
                 logger.error(f"Source: {self.source_channel}, Destination: {self.destination_channel}")
                 return
             
-            logger.info("Starting to forward existing messages...")
+            logger.info("Starting to forward existing messages in batches of 100...")
             logger.info(f"Source: {self.source_channel.title}")
             logger.info(f"Destination: {self.destination_channel.title}")
+            logger.info("⏱️  Waiting 1 minute between each batch of 100 videos")
             
             # Statistics tracking
             start_time = datetime.now()
@@ -157,6 +158,7 @@ class MessageForwarder:
             flood_wait_count = 0
             last_successful_msg_id = None
             first_msg_id = None
+            batch_count = 0
             
             # Build parameters for iter_messages
             # IMPORTANT: Explicitly set limit=None to override Telethon's default 100 message limit
@@ -188,7 +190,12 @@ class MessageForwarder:
                     logger.info("No more messages to process")
                     break
                 
-                logger.info(f"Fetched batch of {len(messages_batch)} messages, processing...")
+                batch_count += 1
+                batch_forwarded = 0
+                logger.info("")
+                logger.info("=" * 70)
+                logger.info(f"📦 BATCH #{batch_count} - Processing {len(messages_batch)} messages")
+                logger.info("=" * 70)
                 
                 # Process each message in the batch
                 for message in messages_batch:
@@ -215,8 +222,9 @@ class MessageForwarder:
                             message
                         )
                         messages_forwarded += 1
+                        batch_forwarded += 1
                         last_successful_msg_id = message.id
-                        logger.info(f"Forwarded message {message.id} ({messages_forwarded} total)")
+                        logger.info(f"✓ Forwarded message {message.id} (Batch: {batch_forwarded}/{len(messages_batch)}, Total: {messages_forwarded})")
                         
                         # Add a small delay to avoid rate limiting
                         await asyncio.sleep(DELAY_BETWEEN_FORWARDS)
@@ -253,6 +261,7 @@ class MessageForwarder:
                                 message
                             )
                             messages_forwarded += 1
+                            batch_forwarded += 1
                             last_successful_msg_id = message.id
                             logger.info(f"✓ Successfully forwarded message {message.id} after wait")
                             
@@ -268,6 +277,21 @@ class MessageForwarder:
                         messages_failed += 1
                         logger.error(f"Error forwarding message {message.id}: {e}")
                         continue
+                
+                # Batch complete - show summary and wait before next batch
+                logger.info("")
+                logger.info(f"✅ Batch #{batch_count} complete: {batch_forwarded} messages forwarded")
+                
+                # Check if we should continue (if there might be more messages)
+                if len(messages_batch) == batch_size:
+                    # Wait 1 minute before processing next batch
+                    logger.info("⏱️  Waiting 60 seconds before next batch...")
+                    logger.info("")
+                    await asyncio.sleep(60)
+                else:
+                    # Last batch was smaller than batch_size, likely no more messages
+                    logger.info("Last batch processed (fewer than 100 messages)")
+                    break
 
             
             # Calculate statistics
@@ -293,6 +317,7 @@ class MessageForwarder:
             logger.info("=" * 70)
             logger.info("📊 FORWARDING SUMMARY")
             logger.info("=" * 70)
+            logger.info(f"📦 Total batches processed: {batch_count}")
             logger.info(f"✅ Successfully forwarded: {messages_forwarded} messages")
             logger.info(f"❌ Failed to forward: {messages_failed} messages")
             logger.info(f"📈 Total processed: {total_messages} messages")
