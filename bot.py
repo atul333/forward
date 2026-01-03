@@ -8,9 +8,10 @@ from config import (
     API_ID, 
     API_HASH, 
     SOURCE_CHANNEL_ID, 
-    DESTINATION_CHANNEL, 
+    DESTINATION_CHANNELS, 
     SESSION_NAME,
-    DELAY_BETWEEN_FORWARDS
+    DELAY_BETWEEN_FORWARDS,
+    VIDEOS_PER_CHANNEL
 )
 
 # Configure logging
@@ -24,7 +25,7 @@ class MessageForwarder:
     def __init__(self):
         self.client = None
         self.source_channel = None
-        self.destination_channel = None
+        self.destination_channels = []  # List of destination channels
         
     async def start(self):
         """Initialize and start the bot"""
@@ -40,55 +41,64 @@ class MessageForwarder:
             self.source_channel = await self.client.get_entity(SOURCE_CHANNEL_ID)
             logger.info(f"Source channel found: {self.source_channel.title}")
             
-            # Get destination channel - handle invite links, usernames, or IDs
-            try:
-                # Check if DESTINATION_CHANNEL is a string (username or invite link) or integer (channel ID)
-                if isinstance(DESTINATION_CHANNEL, str) and ('+' in DESTINATION_CHANNEL or 'joinchat' in DESTINATION_CHANNEL):
-                    logger.info("Destination is an invite link, attempting to join...")
-                    # Extract the hash from the invite link
-                    invite_hash = DESTINATION_CHANNEL.split('+')[-1].split('/')[-1]
-                    
-                    # Try to join the channel using the invite link
-                    try:
-                        from telethon.tl.functions.messages import ImportChatInviteRequest
-                        updates = await self.client(ImportChatInviteRequest(invite_hash))
-                        # Get the channel from the updates
-                        if hasattr(updates, 'chats') and updates.chats:
-                            self.destination_channel = updates.chats[0]
-                            logger.info(f"Joined and found destination channel: {self.destination_channel.title}")
-                        else:
-                            logger.error("Could not get channel info after joining")
-                            raise Exception("Failed to get channel after joining")
-                    except Exception as join_error:
-                        # Maybe already a member, try to get entity directly
-                        logger.info(f"Join attempt failed (might already be a member): {join_error}")
-                        logger.info("Trying to get channel entity directly...")
-                        # Try with the full link
-                        self.destination_channel = await self.client.get_entity(DESTINATION_CHANNEL)
-                        logger.info(f"Destination channel found: {self.destination_channel.title}")
-                else:
-                    # Regular channel username (string) or ID (integer)
-                    dest_type = "ID" if isinstance(DESTINATION_CHANNEL, int) else "username"
-                    logger.info(f"Getting destination channel by {dest_type}: {DESTINATION_CHANNEL}")
-                    self.destination_channel = await self.client.get_entity(DESTINATION_CHANNEL)
-                    logger.info(f"Destination channel found: {self.destination_channel.title}")
-                    
-            except Exception as dest_error:
-                logger.error(f"Error getting destination channel: {dest_error}")
-                logger.error("Please make sure:")
-                logger.error("1. You have joined the destination channel")
-                logger.error("2. The channel username/link is correct in config.py")
-                logger.error("3. You have permission to post in the channel")
-                raise
+            # Get destination channels - handle invite links, usernames, or IDs
+            logger.info(f"Initializing {len(DESTINATION_CHANNELS)} destination channels...")
             
-            # Validate both channels are set
-            if self.source_channel is None or self.destination_channel is None:
-                logger.error("Failed to initialize channels!")
+            for idx, dest_channel in enumerate(DESTINATION_CHANNELS, 1):
+                try:
+                    # Check if dest_channel is a string (username or invite link) or integer (channel ID)
+                    if isinstance(dest_channel, str) and ('+' in dest_channel or 'joinchat' in dest_channel):
+                        logger.info(f"Channel {idx} is an invite link, attempting to join...")
+                        # Extract the hash from the invite link
+                        invite_hash = dest_channel.split('+')[-1].split('/')[-1]
+                        
+                        # Try to join the channel using the invite link
+                        try:
+                            from telethon.tl.functions.messages import ImportChatInviteRequest
+                            updates = await self.client(ImportChatInviteRequest(invite_hash))
+                            # Get the channel from the updates
+                            if hasattr(updates, 'chats') and updates.chats:
+                                channel_entity = updates.chats[0]
+                                self.destination_channels.append(channel_entity)
+                                logger.info(f"✓ Channel {idx} joined and found: {channel_entity.title}")
+                            else:
+                                logger.error(f"Could not get channel {idx} info after joining")
+                                raise Exception(f"Failed to get channel {idx} after joining")
+                        except Exception as join_error:
+                            # Maybe already a member, try to get entity directly
+                            logger.info(f"Join attempt failed for channel {idx} (might already be a member): {join_error}")
+                            logger.info(f"Trying to get channel {idx} entity directly...")
+                            # Try with the full link
+                            channel_entity = await self.client.get_entity(dest_channel)
+                            self.destination_channels.append(channel_entity)
+                            logger.info(f"✓ Channel {idx} found: {channel_entity.title}")
+                    else:
+                        # Regular channel username (string) or ID (integer)
+                        dest_type = "ID" if isinstance(dest_channel, int) else "username"
+                        logger.info(f"Getting channel {idx} by {dest_type}: {dest_channel}")
+                        channel_entity = await self.client.get_entity(dest_channel)
+                        self.destination_channels.append(channel_entity)
+                        logger.info(f"✓ Channel {idx} found: {channel_entity.title}")
+                        
+                except Exception as dest_error:
+                    logger.error(f"Error getting destination channel {idx}: {dest_error}")
+                    logger.error("Please make sure:")
+                    logger.error(f"1. You have joined destination channel {idx}")
+                    logger.error(f"2. The channel username/link is correct in config.py")
+                    logger.error(f"3. You have permission to post in channel {idx}")
+                    raise
+            
+            # Validate all channels are set
+            if self.source_channel is None or len(self.destination_channels) != len(DESTINATION_CHANNELS):
+                logger.error("Failed to initialize all channels!")
                 logger.error(f"Source channel: {self.source_channel}")
-                logger.error(f"Destination channel: {self.destination_channel}")
+                logger.error(f"Destination channels initialized: {len(self.destination_channels)}/{len(DESTINATION_CHANNELS)}")
                 raise Exception("Channel initialization failed")
             
-            logger.info("✓ Both channels initialized successfully!")
+            logger.info("✓ All channels initialized successfully!")
+            logger.info(f"  Source: {self.source_channel.title}")
+            for idx, channel in enumerate(self.destination_channels, 1):
+                logger.info(f"  Destination {idx}: {channel.title}")
             
         except Exception as e:
             logger.error(f"Error getting channels: {e}")
@@ -96,17 +106,39 @@ class MessageForwarder:
     
     def setup_listener(self):
         """Setup event listener for new messages"""
+        # Round-robin state for new messages
+        listener_channel_index = 0
+        listener_videos_count = 0
+        
         # Start listening for new messages
         @self.client.on(events.NewMessage(chats=self.source_channel))
         async def handler(event):
+            nonlocal listener_channel_index, listener_videos_count
+            
             try:
+                # Check if we need to switch to next channel
+                if listener_videos_count >= VIDEOS_PER_CHANNEL:
+                    listener_channel_index = (listener_channel_index + 1) % len(self.destination_channels)
+                    listener_videos_count = 0
+                    logger.info("")
+                    logger.info("🔄 " + "=" * 68)
+                    logger.info(f"🔄 SWITCHING TO CHANNEL {listener_channel_index + 1}: {self.destination_channels[listener_channel_index].title}")
+                    logger.info("🔄 " + "=" * 68)
+                    logger.info("")
+                
+                current_dest = self.destination_channels[listener_channel_index]
+                
                 logger.info(f"New message received: {event.message.id}")
-                # Forward the message to destination channel
+                # Forward the message to current destination channel
                 await self.client.forward_messages(
-                    self.destination_channel,
+                    current_dest,
                     event.message
                 )
-                logger.info(f"Message {event.message.id} forwarded successfully!")
+                listener_videos_count += 1
+                logger.info(
+                    f"Message {event.message.id} forwarded to Channel {listener_channel_index + 1} "
+                    f"({listener_videos_count}/{VIDEOS_PER_CHANNEL} to this channel)"
+                )
             except FloodWaitError as e:
                 wait_seconds = e.seconds + 60
                 wait_minutes = wait_seconds / 60
@@ -125,9 +157,10 @@ class MessageForwarder:
                 # Retry forwarding
                 try:
                     await self.client.forward_messages(
-                        self.destination_channel,
+                        current_dest,
                         event.message
                     )
+                    listener_videos_count += 1
                     logger.info(f"✓ Message {event.message.id} forwarded successfully after wait!")
                 except Exception as retry_error:
                     logger.error(f"Failed to forward message {event.message.id} after wait: {retry_error}")
@@ -138,17 +171,20 @@ class MessageForwarder:
         logger.info("Press Ctrl+C to stop")
     
     async def forward_existing_messages(self, start_id=1, end_id=None, limit=None):
-        """Forward existing messages from source to destination with flood wait handling"""
+        """Forward existing messages from source to destination channels in round-robin fashion with flood wait handling"""
         try:
             # Validate channels are initialized
-            if self.source_channel is None or self.destination_channel is None:
+            if self.source_channel is None or len(self.destination_channels) == 0:
                 logger.error("Channels not initialized! Cannot forward messages.")
-                logger.error(f"Source: {self.source_channel}, Destination: {self.destination_channel}")
+                logger.error(f"Source: {self.source_channel}, Destinations: {len(self.destination_channels)}")
                 return
             
-            logger.info("Starting to forward existing messages in batches of 100...")
+            logger.info("Starting to forward existing messages in round-robin fashion...")
             logger.info(f"Source: {self.source_channel.title}")
-            logger.info(f"Destination: {self.destination_channel.title}")
+            logger.info(f"Destination channels ({len(self.destination_channels)}):")
+            for idx, channel in enumerate(self.destination_channels, 1):
+                logger.info(f"  {idx}. {channel.title}")
+            logger.info(f"📊 Forwarding {VIDEOS_PER_CHANNEL} videos to each channel before switching")
             logger.info("⏱️  Waiting 1 minute between each batch of 100 videos")
             
             # Statistics tracking
@@ -159,6 +195,11 @@ class MessageForwarder:
             last_successful_msg_id = None
             first_msg_id = None
             batch_count = 0
+            
+            # Round-robin tracking
+            current_channel_index = 0  # Start with first channel
+            videos_to_current_channel = 0  # Count videos sent to current channel
+            channel_stats = {i: 0 for i in range(len(self.destination_channels))}  # Track per-channel counts
             
             # Build parameters for iter_messages
             # IMPORTANT: Explicitly set limit=None to override Telethon's default 100 message limit
@@ -215,16 +256,37 @@ class MessageForwarder:
                     if first_msg_id is None:
                         first_msg_id = message.id
                     
+                    # Check if we need to switch to next channel
+                    if videos_to_current_channel >= VIDEOS_PER_CHANNEL:
+                        # Switch to next channel
+                        current_channel_index = (current_channel_index + 1) % len(self.destination_channels)
+                        videos_to_current_channel = 0
+                        logger.info("")
+                        logger.info("🔄 " + "=" * 68)
+                        logger.info(f"🔄 SWITCHING TO CHANNEL {current_channel_index + 1}: {self.destination_channels[current_channel_index].title}")
+                        logger.info("🔄 " + "=" * 68)
+                        logger.info("")
+                    
+                    # Get current destination channel
+                    current_dest_channel = self.destination_channels[current_channel_index]
+                    
                     try:
-                        # Forward message to destination
+                        # Forward message to current destination channel
                         await self.client.forward_messages(
-                            self.destination_channel,
+                            current_dest_channel,
                             message
                         )
                         messages_forwarded += 1
                         batch_forwarded += 1
+                        videos_to_current_channel += 1
+                        channel_stats[current_channel_index] += 1
                         last_successful_msg_id = message.id
-                        logger.info(f"✓ Forwarded message {message.id} (Batch: {batch_forwarded}/{len(messages_batch)}, Total: {messages_forwarded})")
+                        
+                        logger.info(
+                            f"✓ Forwarded message {message.id} to Channel {current_channel_index + 1} "
+                            f"({videos_to_current_channel}/{VIDEOS_PER_CHANNEL} to this channel) "
+                            f"(Batch: {batch_forwarded}/{len(messages_batch)}, Total: {messages_forwarded})"
+                        )
                         
                         # Add a small delay to avoid rate limiting
                         await asyncio.sleep(DELAY_BETWEEN_FORWARDS)
@@ -257,11 +319,13 @@ class MessageForwarder:
                         # Retry forwarding this message
                         try:
                             await self.client.forward_messages(
-                                self.destination_channel,
+                                current_dest_channel,
                                 message
                             )
                             messages_forwarded += 1
                             batch_forwarded += 1
+                            videos_to_current_channel += 1
+                            channel_stats[current_channel_index] += 1
                             last_successful_msg_id = message.id
                             logger.info(f"✓ Successfully forwarded message {message.id} after wait")
                             
@@ -322,6 +386,10 @@ class MessageForwarder:
             logger.info(f"❌ Failed to forward: {messages_failed} messages")
             logger.info(f"📈 Total processed: {total_messages} messages")
             logger.info(f"🎯 Success rate: {success_rate:.1f}%")
+            logger.info("-" * 70)
+            logger.info("📺 Per-Channel Distribution:")
+            for idx, channel in enumerate(self.destination_channels):
+                logger.info(f"  Channel {idx + 1} ({channel.title}): {channel_stats[idx]} videos")
             logger.info("-" * 70)
             logger.info(f"🔢 First message ID: {first_msg_id}")
             logger.info(f"🔢 Last message ID forwarded: {last_successful_msg_id}")
