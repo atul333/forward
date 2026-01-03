@@ -46,6 +46,12 @@ class MessageForwarder:
             
             for idx, dest_channel in enumerate(DESTINATION_CHANNELS, 1):
                 try:
+                    # Convert string channel IDs to integers if they look like IDs
+                    # (e.g., "-1003680603642" should be treated as -1003680603642)
+                    if isinstance(dest_channel, str) and dest_channel.lstrip('-').isdigit():
+                        logger.info(f"Channel {idx}: Converting string ID '{dest_channel}' to integer")
+                        dest_channel = int(dest_channel)
+                    
                     # Check if dest_channel is a string (username or invite link) or integer (channel ID)
                     if isinstance(dest_channel, str) and ('+' in dest_channel or 'joinchat' in dest_channel):
                         logger.info(f"Channel {idx} is an invite link, attempting to join...")

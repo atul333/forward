@@ -12,10 +12,11 @@ BOT_TOKEN = "8084457483:AAEHgETP6tVbqnTWBgHG_KEjtMDe1oINVFo"
 SOURCE_CHANNEL_ID = -1002515799124  # Source channel ID (private channel with -100 prefix)
 
 # Destination channels - Add your 3 channels here (can be usernames, IDs, or invite links)
+# IMPORTANT: Channel IDs should be integers (no quotes), usernames/links should be strings (with quotes)
 DESTINATION_CHANNELS = [
-    "channel1_username",  # Replace with your first channel username/ID/invite link
-    "channel2_username",  # Replace with your second channel username/ID/invite link
-    "channel3_username",  # Replace with your third channel username/ID/invite link
+    "channel1_username",              # Example: Username (with quotes)
+    -1001234567890,                   # Example: Channel ID (NO quotes - must be integer)
+    "https://t.me/+AbCdEfGhIjKlMnOp", # Example: Invite link (with quotes)
 ]
 
 # Session name (will create a .session file with this name)
